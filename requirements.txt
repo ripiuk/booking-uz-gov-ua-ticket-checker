@@ -1,0 +1,2 @@
+gopkg.in/yaml.v2
+github.com/go-telegram-bot-api/telegram-bot-api
