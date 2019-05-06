@@ -1,7 +1,8 @@
-# Ticket checker for https://booking.uz.gov.ua/ 
+# Tickets checker for https://booking.uz.gov.ua/ 
 
 ### Description
-This is a ticket checker telegram bot for https://booking.uz.gov.ua/ site.
+This is a tickets checker telegram bot for https://booking.uz.gov.ua/ site. 
+You can not only check available tickets with the bot, but also set up some periodic inspection.
 
 Project programming language is [Go 1.12](https://blog.golang.org/go1.12).
 
