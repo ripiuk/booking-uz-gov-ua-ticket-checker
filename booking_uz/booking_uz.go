@@ -15,11 +15,35 @@ const (
 	baseURL string = "https://booking.uz.gov.ua/uk/"
 )
 
+type TrainsInfo struct {
+	Data struct{
+		List []struct{
+			TrainId string `json:"num"`
+			TravelTime string
+			From struct{
+				Station string
+				Date string
+				Time string
+			}
+			To struct{
+				Station string
+				Date string
+				Time string
+			}
+			Types []struct{
+				Title string
+				Places int8
+			}
+		}
+		Warning string `json:",omitempty"`
+	}
+}
+
 // Get a list of stations by station name
 // name: e.g "Вінниця"
 // return: e.g [map[region:<nil> title:Вінниця value:%!s(float64=2.2002e+06)]
 // 				map[region:<nil> title:Вінниця-Вант. value:%!s(float64=2.200318e+06)]]
-func GetStations(name string) ([]map[string]interface{}, error) {
+func Stations(name string) ([]map[string]interface{}, error) {
 	// Generating URL
 	name = url.QueryEscape(name)
 	stationInfoURL := baseURL + "train_search/station/?term=" + name
@@ -46,7 +70,7 @@ func GetStations(name string) ([]map[string]interface{}, error) {
 	return result, nil
 }
 
-func GetFirstStationId(stationsInfo []map[string]interface{}) (string, error) {
+func FirstStationId(stationsInfo []map[string]interface{}) (string, error) {
 	if stationsInfo[0]["value"] == nil {
 		return "", errors.New("помилка парсингу даних. ")
 	}
@@ -55,7 +79,7 @@ func GetFirstStationId(stationsInfo []map[string]interface{}) (string, error) {
 	return stationId, nil
 }
 
-func GetPotentialStations(stationsInfo []map[string]interface{}) ([]string, error) {
+func PotentialStations(stationsInfo []map[string]interface{}) ([]string, error) {
 	var titles []string
 	if len(stationsInfo) == 0 {
 		log.Println("No stations found")
@@ -80,7 +104,7 @@ func GetPotentialStations(stationsInfo []map[string]interface{}) ([]string, erro
 // 		station:Вінниця stationTrain:Кременчук time:23:31] isCis:0 isEurope:0 isTransformer:0 num:150О
 // 		to:map[code:2218200 date:середа, 15.05.2019 sortTime:1.55789976e+09 station:Івано-Франківськ
 // 		stationTrain:Ворохта time:08:56] travelTime:9:25 types:[map[id:К letter:К places:9 title:Купе]]]]]]
-func GetTrains(fromStation string, toStation string, date string) (map[string]interface{}, error) {
+func Trains(fromStation string, toStation string, date string) (TrainsInfo, error) {
 	apiUrl := baseURL
 	resource := "/train_search/"
 	data := url.Values{}
@@ -96,25 +120,25 @@ func GetTrains(fromStation string, toStation string, date string) (map[string]in
 	client := &http.Client{}
 	r, err := http.NewRequest("POST", urlStr, strings.NewReader(data.Encode())) // URL-encoded payload
 	if err != nil {
-		return map[string]interface{}{}, errors.New("неможливо згенерувати POST запит. ")
+		return TrainsInfo{}, errors.New("неможливо згенерувати POST запит. ")
 	}
 	r.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	r.Header.Add("Content-Length", strconv.Itoa(len(data.Encode())))
 
 	resp, err := client.Do(r)
 	if err != nil {
-		return map[string]interface{}{}, errors.New("неможливо виконати POST запит. ")
+		return TrainsInfo{}, errors.New("неможливо виконати POST запит. ")
 	}
 	defer resp.Body.Close()
 
 	log.Println(resp.Status)
-	var trainsInfo map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&trainsInfo)
+	var info TrainsInfo
+	err = json.NewDecoder(resp.Body).Decode(&info)
 	if err != nil {
-		return map[string]interface{}{}, errors.New("неможливо перетворити отримані дані у JSON формат. ")
+		return TrainsInfo{}, errors.New("неможливо перетворити отримані дані у JSON формат. ")
 	}
-	log.Println("Response Body:", trainsInfo)
-	return trainsInfo, nil
+	log.Println("Response Body:", info)
+	return info, nil
 }
 
 //func GetTrainDetail (train string) string {

@@ -97,32 +97,32 @@ func main() {
 				_, _ = bot.Send(msg)
 				continue
 			}
-			fromStationsInfo, err := uzClient.GetStations(fromStationText)
+			fromStationsInfo, err := uzClient.Stations(fromStationText)
 			if err != nil {
 				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
 				continue
 			}
-			toStationsInfo, err := uzClient.GetStations(toStationText)
+			toStationsInfo, err := uzClient.Stations(toStationText)
 			if err != nil {
 				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
 				continue
 			}
-			fromPotentialStations, err := uzClient.GetPotentialStations(fromStationsInfo)
+			fromPotentialStations, err := uzClient.PotentialStations(fromStationsInfo)
 			if err != nil {
 				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
 				continue
 			}
-			toPotentialStations, err := uzClient.GetPotentialStations(toStationsInfo)
+			toPotentialStations, err := uzClient.PotentialStations(toStationsInfo)
 			if err != nil {
 				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
 				continue
 			}
-			fromStationId, err := uzClient.GetFirstStationId(fromStationsInfo)
+			fromStationId, err := uzClient.FirstStationId(fromStationsInfo)
 			if err != nil {
 				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
 				continue
 			}
-			toStationId, err := uzClient.GetFirstStationId(toStationsInfo)
+			toStationId, err := uzClient.FirstStationId(toStationsInfo)
 			if err != nil {
 				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
 				continue
@@ -139,12 +139,29 @@ func main() {
 						strings.Join(toPotentialStations[1:], "\n")))
 			}
 
-			trainsInfo, err := uzClient.GetTrains(fromStationId, toStationId, date)
+			trains, err := uzClient.Trains(fromStationId, toStationId, date)
 			if err != nil {
 				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
 				continue
-			} else {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("%s", trainsInfo)))
+			}
+			if trains.Data.Warning != "" {
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("*%s!*", trains.Data.Warning))
+				msg.ParseMode = "markdown"
+				_, _ = bot.Send(msg)
+			}
+			for _, train := range trains.Data.List {
+				availableCarriages := make([]string, len(train.Types))
+				for i, carriage := range train.Types {
+					availableCarriages[i] = fmt.Sprintf("%s - %d", carriage.Title, carriage.Places)
+				}
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+					"*Номер потяга:* %s\n*Звідки:* %s\n*Куди:* %s\n*Виїзд:* %s о %s год\n" +
+						"*Прибуття:* %s о %s год\n*Тривалість подорожі:* %s\n\n*Доступні вагони:* \n%s",
+						train.TrainId, train.From.Station, train.To.Station, train.From.Date, train.From.Time,
+						train.To.Date, train.To.Time, train.TravelTime, strings.Join(availableCarriages, "\n"),
+					))
+				msg.ParseMode = "markdown"
+				_, _ = bot.Send(msg)
 			}
 		case "stop":
 			if _, ok := currStep[update.Message.Chat.ID]; ok {
