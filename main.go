@@ -5,27 +5,39 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"strconv"
 	"strings"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"gopkg.in/yaml.v2"
 
-	uzClient "BookingUzGovUaTicketCheckerBot/booking_uz"
+	uzClient "booking-uz-gov-ua-ticket-checker/booking_uz"
 )
 
-//type trains struct {
-//	fromStation string
-//	toStation string
-//	date string
-//}
-
-//var trainsList []map[string]trains // key here should be Chat ID
-
-var currStep map[int64]int // key here should be Chat ID
+const (
+	TypeStationFrom   = "TYPE_STATION_FROM"
+	ChooseStationFrom = "CHOOSE_STATION_FROM"
+	TypeStationTo     = "TYPE_STATION_TO"
+	ChooseStationTo   = "CHOOSE_STATION_TO"
+	ChooseDate        = "CHOOSE_DATE"
+	GetResults        = "GET_RESULTS"
+)
 
 type credentials struct {
 	Token string `yaml:"token"`
 }
+
+type train struct {
+	fromStation string
+	toStation string
+	date string
+}
+
+var (
+	currTrain map[int64]train
+	currStep map[int64]string
+)
 
 func (cred *credentials) getCredentials() {
 	yamlFile, err := ioutil.ReadFile("credentials.yaml")
@@ -38,26 +50,53 @@ func (cred *credentials) getCredentials() {
 	}
 }
 
-func monitor() {
-
+func monitoring() {
+	// TODO: implement me
 }
 
-func parseArguments(rawText string) (string, string, string, error){
-	s := strings.Split(rawText, " ")
-	if len(s) != 3 {
-		return "", "", "", errors.New("неправильна кількість параметрів для пошуку. " +
-			"Після команди введіть станцію *звідки* ви плануєте їхать, " +
-			"станцію *куди* ви прямуєте та *дату* у форматі 2019-05-31. " +
-			"Всі ці параметри задаються через пробіл. ")
+func OneTimeReplyKeyboard(rows ...[]tgbotapi.KeyboardButton) tgbotapi.ReplyKeyboardMarkup {
+	var keyboard [][]tgbotapi.KeyboardButton
+
+	keyboard = append(keyboard, rows...)
+
+	return tgbotapi.ReplyKeyboardMarkup{
+		ResizeKeyboard: true,
+		Keyboard:       keyboard,
+		OneTimeKeyboard: true,
 	}
-	log.Println(s)
-	fromStation, toStation, date := s[0], s[1], s[2]
-	return fromStation, toStation, date, nil
+}
+
+func validateDate(rawDate string) (string, error) {
+	s := strings.Split(rawDate, ".")
+	if len(s) != 2 {
+		return "", errors.New("неправильний формат дати")
+	}
+	day, month := s[0], s[1]
+	if d, err := strconv.Atoi(day); err != nil {
+		return "", errors.New("день повинен бути цілочисельним числом")
+	} else if d < 1 || d > 31 {
+		return "", errors.New("день повинен бути у діапазоні 01-31")
+	}
+	if m, err := strconv.Atoi(month); err != nil {
+		return "", errors.New("місяць повинен бути цілочисельним числом")
+	} else if m < 1 || m > 12 {
+		return "", errors.New("місяць повинен бути у діапазоні 01-12")
+	}
+	if len(day) < 2 {
+		day = "0" + day
+	}
+	if len(month) < 2 {
+		month = "0" + month
+	}
+	year := time.Now().Year()
+	return fmt.Sprintf("%d-%s-%s", year, month, day), nil
 }
 
 func main() {
+	currStep = make(map[int64]string)
+	currTrain = make(map[int64]train)
+
 	// Get credentials from yaml file
-	currStep = make(map[int64]int)
 	var cred credentials
 	cred.getCredentials()
 
@@ -69,7 +108,7 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	go monitor()
+	go monitoring()
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -77,7 +116,6 @@ func main() {
 	updates, err := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		var reply string
 
 		if update.Message == nil {
 			continue
@@ -85,101 +123,178 @@ func main() {
 
 		log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
 
-		switch update.Message.Command() {
-		case "start":
-			reply = "Вітаю"
-		case "add_monitoring", "check":
-			currStep[update.Message.Chat.ID] = 1
-			fromStationText, toStationText, date, err := parseArguments(update.Message.CommandArguments())
-			if err != nil {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, err.Error())
-				msg.ParseMode = "markdown"
-				_, _ = bot.Send(msg)
+		if update.Message.IsCommand() == false {
+			if _, ok := currStep[update.Message.Chat.ID]; !ok {
 				continue
 			}
-			fromStationsInfo, err := uzClient.Stations(fromStationText)
-			if err != nil {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
-				continue
-			}
-			toStationsInfo, err := uzClient.Stations(toStationText)
-			if err != nil {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
-				continue
-			}
-			fromPotentialStations, err := uzClient.PotentialStations(fromStationsInfo)
-			if err != nil {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
-				continue
-			}
-			toPotentialStations, err := uzClient.PotentialStations(toStationsInfo)
-			if err != nil {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
-				continue
-			}
-			fromStationId, err := uzClient.FirstStationId(fromStationsInfo)
-			if err != nil {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
-				continue
-			}
-			toStationId, err := uzClient.FirstStationId(toStationsInfo)
-			if err != nil {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
-				continue
-			}
-			// TODO: check data
-			if len(fromPotentialStations) > 1 {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-					"Також можливі наступні варіанти станцій (звідки): \n"+
-						strings.Join(fromPotentialStations[1:], "\n")))
-			}
-			if len(toPotentialStations) > 1 {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-					"Також можливі наступні варіанти станцій (куди): \n"+
-						strings.Join(toPotentialStations[1:], "\n")))
+			if _, ok := currTrain[update.Message.Chat.ID]; !ok {
+				currTrain[update.Message.Chat.ID] = train{}
 			}
 
-			trains, err := uzClient.Trains(fromStationId, toStationId, date)
-			if err != nil {
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
-				continue
-			}
-			if trains.Data.Warning != "" {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("*%s!*", trains.Data.Warning))
-				msg.ParseMode = "markdown"
-				_, _ = bot.Send(msg)
-			}
-			for _, train := range trains.Data.List {
-				availableCarriages := make([]string, len(train.Types))
-				for i, carriage := range train.Types {
-					availableCarriages[i] = fmt.Sprintf("%s - %d", carriage.Title, carriage.Places)
+			if currStep[update.Message.Chat.ID] == TypeStationFrom ||
+				currStep[update.Message.Chat.ID] == ChooseStationFrom {
+				fromStationsInfo, err := uzClient.Stations(update.Message.Text)
+				if err != nil {
+					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+					continue
 				}
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
-					"*Номер потяга:* %s\n*Звідки:* %s\n*Куди:* %s\n*Виїзд:* %s о %s год\n" +
-						"*Прибуття:* %s о %s год\n*Тривалість подорожі:* %s\n\n*Доступні вагони:* \n%s",
+				fromPotentialStations, err := uzClient.PotentialStations(fromStationsInfo)
+				if err != nil {
+					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+					continue
+				}
+				if len(fromPotentialStations) > 1 && currStep[update.Message.Chat.ID] == TypeStationFrom {
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+						"Оберіть станцію із запропонованих варіантів.\n\nАбо виконайте пошук /search")
+
+					var keyboard [][]tgbotapi.KeyboardButton
+					for _, station := range fromPotentialStations {
+						keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton(station)))
+					}
+					msg.ReplyMarkup = OneTimeReplyKeyboard(keyboard...)
+					_, _ = bot.Send(msg)
+					currStep[update.Message.Chat.ID] = ChooseStationFrom
+				} else {
+					fromStationId, err := uzClient.FirstStationId(fromStationsInfo)
+					if err != nil {
+						_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+							"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+						continue
+					}
+					var train = currTrain[update.Message.Chat.ID]
+					train.fromStation = fromStationId
+					currTrain[update.Message.Chat.ID] = train
+
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+						"Станція відправлення: *%s*\n\nТепер вкажіть станцію *прибуття*\n*Наприклад:* Львів",
+						fromPotentialStations[0]))
+					msg.ParseMode = "markdown"
+					_, _ = bot.Send(msg)
+
+					currStep[update.Message.Chat.ID] = TypeStationTo
+					continue
+				}
+			}
+
+			if currStep[update.Message.Chat.ID] == TypeStationTo ||
+				currStep[update.Message.Chat.ID] == ChooseStationTo {
+				toStationsInfo, err := uzClient.Stations(update.Message.Text)
+				if err != nil {
+					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+					continue
+				}
+				toPotentialStations, err := uzClient.PotentialStations(toStationsInfo)
+				if err != nil {
+					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+					continue
+				}
+				if len(toPotentialStations) > 1 && currStep[update.Message.Chat.ID] == TypeStationTo {
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+						"Оберіть станцію із запропонованих варіантів.\n\nАбо виконайте пошук /search")
+
+					var keyboard [][]tgbotapi.KeyboardButton
+					for _, station := range toPotentialStations {
+						keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton(station)))
+					}
+					msg.ReplyMarkup = OneTimeReplyKeyboard(keyboard...)
+					_, _ = bot.Send(msg)
+					currStep[update.Message.Chat.ID] = ChooseStationTo
+				} else {
+					toStationId, err := uzClient.FirstStationId(toStationsInfo)
+					if err != nil {
+						_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+							"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+						continue
+					}
+					var train = currTrain[update.Message.Chat.ID]
+					train.toStation = toStationId
+					currTrain[update.Message.Chat.ID] = train
+
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+						"Станція прибуття: *%s*\n\nТепер вкажіть дату поїздки у форматі день.місяць" +
+							"\n*Наприклад:* 30.06", toPotentialStations[0]))
+					msg.ParseMode = "markdown"
+					msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+					_, _ = bot.Send(msg)
+
+					currStep[update.Message.Chat.ID] = ChooseDate
+					continue
+				}
+			}
+
+			if currStep[update.Message.Chat.ID] == ChooseDate {
+				date, err := validateDate(update.Message.Text)
+				if err != nil {
+					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+					continue
+				}
+				var train = currTrain[update.Message.Chat.ID]
+				train.date = date
+				currTrain[update.Message.Chat.ID] = train
+
+				trains, err := uzClient.Trains(
+					currTrain[update.Message.Chat.ID].fromStation,
+					currTrain[update.Message.Chat.ID].toStation,
+					currTrain[update.Message.Chat.ID].date)
+				if err != nil {
+					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+					continue
+				}
+				if trains.Data.Warning != "" {
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("*%s!*", trains.Data.Warning))
+					msg.ParseMode = "markdown"
+					_, _ = bot.Send(msg)
+				}
+				for _, train := range trains.Data.List {
+					availableCarriages := make([]string, len(train.Types))
+					for i, carriage := range train.Types {
+						availableCarriages[i] = fmt.Sprintf("%s - %d", carriage.Title, carriage.Places)
+					}
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+						"*Номер потяга:* %s\n*Звідки:* %s\n*Куди:* %s\n*Виїзд:* %s о %s год\n"+
+							"*Прибуття:* %s о %s год\n*Тривалість подорожі:* %s\n\n*Доступні вагони:* \n%s",
 						train.TrainId, train.From.Station, train.To.Station, train.From.Date, train.From.Time,
 						train.To.Date, train.To.Time, train.TravelTime, strings.Join(availableCarriages, "\n"),
 					))
-				msg.ParseMode = "markdown"
+					msg.ParseMode = "markdown"
+					_, _ = bot.Send(msg)
+				}
+				currStep[update.Message.Chat.ID] = GetResults
+				continue
+			}
+		} else if update.Message.Command() == "start" {
+			_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Привіт"))
+		} else if update.Message.Command() == "stop" {
+			if _, ok := currStep[update.Message.Chat.ID]; ok {
+				delete(currStep, update.Message.Chat.ID)
+				delete(currTrain, update.Message.Chat.ID)
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Пошук зупинено")
+				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 				_, _ = bot.Send(msg)
 			}
-		case "stop":
-			if _, ok := currStep[update.Message.Chat.ID]; ok {
-				currStep[update.Message.Chat.ID] = 0
-				reply = "Зупинено"
-			}
-		case "list":
-			reply = "Список"
-		case "help":
-			reply = "Тут help message"
-		case "find_station":
-			reply = "Можливі варіанти:"
-		default:
-			reply = "Невідома команда"
-		}
+		} else if update.Message.Command() == "check" {
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+				"Вкажіть станцію *відправлення*\n*Наприклад:* Вінниця"))
+			msg.ParseMode = "markdown"
+			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+			_, _ = bot.Send(msg)
+			currStep[update.Message.Chat.ID] = TypeStationFrom
+		} else if update.Message.Command() == "search" {
 
-		if reply != "" {
-			_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, reply))
+		} else if update.Message.Command() == "list" {
+
+		} else if update.Message.Command() == "help" {
+
+		} else {
+			_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,"Невідома команда"))
 		}
 	}
 }

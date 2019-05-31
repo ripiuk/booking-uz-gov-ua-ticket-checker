@@ -1,9 +1,11 @@
 package booking_uz
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -32,11 +34,16 @@ type TrainsInfo struct {
 			}
 			Types []struct{
 				Title string
-				Places int8
+				Places int16
 			}
 		}
 		Warning string `json:",omitempty"`
 	}
+}
+
+type TrainsInfoError struct {
+	Data string
+	Error int
 }
 
 // Get a list of stations by station name
@@ -133,9 +140,17 @@ func Trains(fromStation string, toStation string, date string) (TrainsInfo, erro
 
 	log.Println(resp.Status)
 	var info TrainsInfo
-	err = json.NewDecoder(resp.Body).Decode(&info)
-	if err != nil {
-		return TrainsInfo{}, errors.New("неможливо перетворити отримані дані у JSON формат. ")
+	bodyBytes, _ := ioutil.ReadAll(resp.Body)
+	resp.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+	decErr := json.NewDecoder(resp.Body).Decode(&info)
+	if decErr != nil {
+		var infoWithError TrainsInfoError
+		resp.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+		newErr := json.NewDecoder(resp.Body).Decode(&infoWithError)
+		if newErr != nil {
+			return TrainsInfo{}, errors.New("неможливо перетворити отримані дані у JSON формат. ")
+		}
+		return TrainsInfo{}, errors.New(infoWithError.Data)
 	}
 	log.Println("Response Body:", info)
 	return info, nil
