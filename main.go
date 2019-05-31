@@ -22,6 +22,7 @@ const (
 	ChooseStationTo   = "CHOOSE_STATION_TO"
 	ChooseDate        = "CHOOSE_DATE"
 	GetResults        = "GET_RESULTS"
+	FindStation		  = "FIND_STATION"
 )
 
 type credentials struct {
@@ -133,6 +134,7 @@ func main() {
 
 			if currStep[update.Message.Chat.ID] == TypeStationFrom ||
 				currStep[update.Message.Chat.ID] == ChooseStationFrom {
+				// Станція відправлення
 				fromStationsInfo, err := uzClient.Stations(update.Message.Text)
 				if err != nil {
 					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
@@ -181,6 +183,7 @@ func main() {
 
 			if currStep[update.Message.Chat.ID] == TypeStationTo ||
 				currStep[update.Message.Chat.ID] == ChooseStationTo {
+				// Станція прибуття
 				toStationsInfo, err := uzClient.Stations(update.Message.Text)
 				if err != nil {
 					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
@@ -229,6 +232,7 @@ func main() {
 			}
 
 			if currStep[update.Message.Chat.ID] == ChooseDate {
+				// Введення дати, виведення результату
 				date, err := validateDate(update.Message.Text)
 				if err != nil {
 					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
@@ -270,6 +274,32 @@ func main() {
 				currStep[update.Message.Chat.ID] = GetResults
 				continue
 			}
+
+			if currStep[update.Message.Chat.ID] == FindStation {
+				// Пошук станцій
+				stationsInfo, err := uzClient.Stations(update.Message.Text)
+				if err != nil {
+					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
+						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+					continue
+				}
+				potentialStations, err := uzClient.PotentialStations(stationsInfo)
+				if err != nil {
+					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()+
+						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+					continue
+				}
+				var msg string
+				if len(potentialStations) > 0 {
+					msg = "Результати пошуку: \n" + strings.Join(potentialStations, "\n") +
+						"\n\nВведіть нові параметри пошуку, або /stop для завершення пошуку"
+				} else {
+					msg = "За заданими параметрами пошуку нічого не знайдено\n" +
+						"Спробуйте змінити Ваш запит, або введіть /stop для завершення пошуку"
+				}
+				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, msg))
+				continue
+			}
 		} else if update.Message.Command() == "start" {
 			_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Привіт"))
 		} else if update.Message.Command() == "stop" {
@@ -288,7 +318,12 @@ func main() {
 			_, _ = bot.Send(msg)
 			currStep[update.Message.Chat.ID] = TypeStationFrom
 		} else if update.Message.Command() == "search" {
-
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+				"Вкажіть назву *станції* для пошуку\n*Наприклад:* Вінниця"))
+			msg.ParseMode = "markdown"
+			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+			_, _ = bot.Send(msg)
+			currStep[update.Message.Chat.ID] = FindStation
 		} else if update.Message.Command() == "list" {
 
 		} else if update.Message.Command() == "help" {
