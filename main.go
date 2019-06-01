@@ -22,7 +22,7 @@ const (
 	ChooseStationTo   = "CHOOSE_STATION_TO"
 	ChooseDate        = "CHOOSE_DATE"
 	GetResults        = "GET_RESULTS"
-	FindStation		  = "FIND_STATION"
+	FindStation       = "FIND_STATION"
 )
 
 type credentials struct {
@@ -93,6 +93,48 @@ func validateDate(rawDate string) (string, error) {
 	return fmt.Sprintf("%d-%s-%s", year, month, day), nil
 }
 
+func getStation(chatId int64, message string, bot *tgbotapi.BotAPI, isFrom bool) (string, error) {
+	var typeStep, chooseStep string
+	if isFrom {
+		typeStep, chooseStep = TypeStationFrom, ChooseStationFrom
+	} else {
+		typeStep, chooseStep = TypeStationTo, ChooseStationTo
+	}
+
+	stationsInfo, err := uzClient.Stations(message)
+	if err != nil {
+		return "", err
+	}
+	potentialStations, err := uzClient.PotentialStations(stationsInfo)
+	if err != nil {
+		return "", err
+	}
+	if len(potentialStations) > 1 && currStep[chatId] == typeStep {
+		msg := tgbotapi.NewMessage(chatId,
+			"Оберіть станцію із запропонованих варіантів.\n\nАбо виконайте пошук /search" +
+			"\nБот знаходиться на стадії розробки, можливий спам та нестабільність роботи.")
+
+		var keyboard [][]tgbotapi.KeyboardButton
+		for _, station := range potentialStations {
+			keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton(station)))
+		}
+		msg.ReplyMarkup = OneTimeReplyKeyboard(keyboard...)
+		_, _ = bot.Send(msg)
+		currStep[chatId] = chooseStep
+	} else {
+		fromStationId, err := uzClient.FirstStationId(stationsInfo)
+		if err != nil {
+			return "", err
+		}
+		var train = currTrain[chatId]
+		train.fromStation = fromStationId
+		currTrain[chatId] = train
+		return potentialStations[0], nil
+	}
+	return "", nil
+}
+
 func main() {
 	currStep = make(map[int64]string)
 	currTrain = make(map[int64]train)
@@ -135,100 +177,54 @@ func main() {
 			if currStep[update.Message.Chat.ID] == TypeStationFrom ||
 				currStep[update.Message.Chat.ID] == ChooseStationFrom {
 				// Станція відправлення
-				fromStationsInfo, err := uzClient.Stations(update.Message.Text)
+				station, err := getStation(
+					update.Message.Chat.ID,
+					update.Message.Text,
+					bot,
+					true)
 				if err != nil {
 					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
 						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
 					continue
 				}
-				fromPotentialStations, err := uzClient.PotentialStations(fromStationsInfo)
-				if err != nil {
-					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
-						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+				if station == "" {
 					continue
 				}
-				if len(fromPotentialStations) > 1 && currStep[update.Message.Chat.ID] == TypeStationFrom {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Оберіть станцію із запропонованих варіантів.\n\nАбо виконайте пошук /search")
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+					"Станція відправлення: *%s*\n\nТепер вкажіть станцію *прибуття*" +
+						"\n*Наприклад:* Львів", station))
+				msg.ParseMode = "markdown"
+				_, _ = bot.Send(msg)
 
-					var keyboard [][]tgbotapi.KeyboardButton
-					for _, station := range fromPotentialStations {
-						keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
-							tgbotapi.NewKeyboardButton(station)))
-					}
-					msg.ReplyMarkup = OneTimeReplyKeyboard(keyboard...)
-					_, _ = bot.Send(msg)
-					currStep[update.Message.Chat.ID] = ChooseStationFrom
-				} else {
-					fromStationId, err := uzClient.FirstStationId(fromStationsInfo)
-					if err != nil {
-						_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
-							"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
-						continue
-					}
-					var train = currTrain[update.Message.Chat.ID]
-					train.fromStation = fromStationId
-					currTrain[update.Message.Chat.ID] = train
-
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
-						"Станція відправлення: *%s*\n\nТепер вкажіть станцію *прибуття*\n*Наприклад:* Львів",
-						fromPotentialStations[0]))
-					msg.ParseMode = "markdown"
-					_, _ = bot.Send(msg)
-
-					currStep[update.Message.Chat.ID] = TypeStationTo
-					continue
-				}
+				currStep[update.Message.Chat.ID] = TypeStationTo
+				continue
 			}
 
 			if currStep[update.Message.Chat.ID] == TypeStationTo ||
 				currStep[update.Message.Chat.ID] == ChooseStationTo {
 				// Станція прибуття
-				toStationsInfo, err := uzClient.Stations(update.Message.Text)
+				station, err := getStation(
+					update.Message.Chat.ID,
+					update.Message.Text,
+					bot,
+					false)
 				if err != nil {
 					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
 						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
 					continue
 				}
-				toPotentialStations, err := uzClient.PotentialStations(toStationsInfo)
-				if err != nil {
-					_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
-						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
+				if station == "" {
 					continue
 				}
-				if len(toPotentialStations) > 1 && currStep[update.Message.Chat.ID] == TypeStationTo {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Оберіть станцію із запропонованих варіантів.\n\nАбо виконайте пошук /search")
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+					"Станція прибуття: *%s*\n\nТепер вкажіть дату поїздки у форматі день.місяць" +
+						"\n*Наприклад:* 30.06", station))
+				msg.ParseMode = "markdown"
+				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+				_, _ = bot.Send(msg)
 
-					var keyboard [][]tgbotapi.KeyboardButton
-					for _, station := range toPotentialStations {
-						keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
-							tgbotapi.NewKeyboardButton(station)))
-					}
-					msg.ReplyMarkup = OneTimeReplyKeyboard(keyboard...)
-					_, _ = bot.Send(msg)
-					currStep[update.Message.Chat.ID] = ChooseStationTo
-				} else {
-					toStationId, err := uzClient.FirstStationId(toStationsInfo)
-					if err != nil {
-						_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, err.Error() +
-							"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
-						continue
-					}
-					var train = currTrain[update.Message.Chat.ID]
-					train.toStation = toStationId
-					currTrain[update.Message.Chat.ID] = train
-
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
-						"Станція прибуття: *%s*\n\nТепер вкажіть дату поїздки у форматі день.місяць" +
-							"\n*Наприклад:* 30.06", toPotentialStations[0]))
-					msg.ParseMode = "markdown"
-					msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-					_, _ = bot.Send(msg)
-
-					currStep[update.Message.Chat.ID] = ChooseDate
-					continue
-				}
+				currStep[update.Message.Chat.ID] = ChooseDate
+				continue
 			}
 
 			if currStep[update.Message.Chat.ID] == ChooseDate {
@@ -301,7 +297,10 @@ func main() {
 				continue
 			}
 		} else if update.Message.Command() == "start" {
-			_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Привіт"))
+			_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+				"Привіт.\nБот знаходиться на стадії розробки, можливий спам та нестабільність роботи." +
+				"\nЩоб перевірити наявність квитків введіть команду /check." +
+				"\nЩоб виконати пошук станцій станцій введіть команду /search"))
 		} else if update.Message.Command() == "stop" {
 			if _, ok := currStep[update.Message.Chat.ID]; ok {
 				delete(currStep, update.Message.Chat.ID)
@@ -325,9 +324,12 @@ func main() {
 			_, _ = bot.Send(msg)
 			currStep[update.Message.Chat.ID] = FindStation
 		} else if update.Message.Command() == "list" {
-
+			// TODO: implement me
 		} else if update.Message.Command() == "help" {
-
+			_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+				"Бот знаходиться на стадії розробки, можливий спам та нестабільність роботи." +
+				"\nЩоб перевірити наявність квитків введіть команду /check." +
+				"\nЩоб виконати пошук станцій станцій введіть команду /search"))
 		} else {
 			_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,"Невідома команда"))
 		}
