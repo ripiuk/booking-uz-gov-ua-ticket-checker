@@ -129,8 +129,17 @@ func Trains(fromStation string, toStation string, date string) (TrainsInfo, erro
 	if err != nil {
 		return TrainsInfo{}, errors.New("неможливо згенерувати POST запит. ")
 	}
-	r.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Add("Content-Length", strconv.Itoa(len(data.Encode())))
+	r.Header.Set("Connection", "keep-alive")
+	r.Header.Set("Content-Length", strconv.Itoa(len(data.Encode())))
+	r.Header.Set("Accept", "*/*")
+	r.Header.Set("Origin", "https://booking.uz.gov.ua")
+	r.Header.Set("X-Requested-With", "XMLHttpRequest")
+	r.Header.Set("cache-version", "753")
+	r.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+		"(KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36")
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	r.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	r.Header.Set("Accept-Language", "uk-UA,uk;q=0.9,ru;q=0.8,en-US;q=0.7,en;q=0.6")
 
 	resp, err := client.Do(r)
 	if err != nil {

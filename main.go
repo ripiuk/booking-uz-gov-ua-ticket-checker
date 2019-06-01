@@ -93,7 +93,7 @@ func validateDate(rawDate string) (string, error) {
 	return fmt.Sprintf("%d-%s-%s", year, month, day), nil
 }
 
-func getStation(chatId int64, message string, bot *tgbotapi.BotAPI, isFrom bool) (string, error) {
+func getStation(chatId int64, message string, bot *tgbotapi.BotAPI, isFrom bool) (string, string, error) {
 	var typeStep, chooseStep string
 	if isFrom {
 		typeStep, chooseStep = TypeStationFrom, ChooseStationFrom
@@ -103,11 +103,11 @@ func getStation(chatId int64, message string, bot *tgbotapi.BotAPI, isFrom bool)
 
 	stationsInfo, err := uzClient.Stations(message)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	potentialStations, err := uzClient.PotentialStations(stationsInfo)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if len(potentialStations) > 1 && currStep[chatId] == typeStep {
 		msg := tgbotapi.NewMessage(chatId,
@@ -123,16 +123,13 @@ func getStation(chatId int64, message string, bot *tgbotapi.BotAPI, isFrom bool)
 		_, _ = bot.Send(msg)
 		currStep[chatId] = chooseStep
 	} else {
-		fromStationId, err := uzClient.FirstStationId(stationsInfo)
+		stationId, err := uzClient.FirstStationId(stationsInfo)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		var train = currTrain[chatId]
-		train.fromStation = fromStationId
-		currTrain[chatId] = train
-		return potentialStations[0], nil
+		return potentialStations[0], stationId, nil
 	}
-	return "", nil
+	return "", "", nil
 }
 
 func main() {
@@ -177,7 +174,7 @@ func main() {
 			if currStep[update.Message.Chat.ID] == TypeStationFrom ||
 				currStep[update.Message.Chat.ID] == ChooseStationFrom {
 				// Станція відправлення
-				station, err := getStation(
+				stationName, stationId, err := getStation(
 					update.Message.Chat.ID,
 					update.Message.Text,
 					bot,
@@ -187,12 +184,17 @@ func main() {
 						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
 					continue
 				}
-				if station == "" {
+				if stationName == "" {
 					continue
 				}
+
+				var train = currTrain[update.Message.Chat.ID]
+				train.fromStation = stationId
+				currTrain[update.Message.Chat.ID] = train
+
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
 					"Станція відправлення: *%s*\n\nТепер вкажіть станцію *прибуття*" +
-						"\n*Наприклад:* Львів", station))
+						"\n*Наприклад:* Львів", stationName))
 				msg.ParseMode = "markdown"
 				_, _ = bot.Send(msg)
 
@@ -203,7 +205,7 @@ func main() {
 			if currStep[update.Message.Chat.ID] == TypeStationTo ||
 				currStep[update.Message.Chat.ID] == ChooseStationTo {
 				// Станція прибуття
-				station, err := getStation(
+				stationName, stationId, err := getStation(
 					update.Message.Chat.ID,
 					update.Message.Text,
 					bot,
@@ -213,12 +215,17 @@ func main() {
 						"\nСпробуйте ще раз\nЩоб припинити пошук введіть /stop"))
 					continue
 				}
-				if station == "" {
+				if stationName == "" {
 					continue
 				}
+
+				var train = currTrain[update.Message.Chat.ID]
+				train.toStation = stationId
+				currTrain[update.Message.Chat.ID] = train
+
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
 					"Станція прибуття: *%s*\n\nТепер вкажіть дату поїздки у форматі день.місяць" +
-						"\n*Наприклад:* 30.06", station))
+						"\n*Наприклад:* 30.06", stationName))
 				msg.ParseMode = "markdown"
 				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 				_, _ = bot.Send(msg)
